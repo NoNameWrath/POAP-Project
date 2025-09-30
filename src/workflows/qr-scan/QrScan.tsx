@@ -6,15 +6,12 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { QrCode, AlertTriangle } from 'lucide-react';
 
-// Pick the *named* export `QrScanner` and return the component itself
+// Correct: pick the named export `Scanner` from the module
 const QRScannerComponent = dynamic(
-  () =>
-    import('@yudiel/react-qr-scanner').then((m) => m.QrScanner),
+  () => import('@yudiel/react-qr-scanner').then((m) => m.Scanner),
   {
     ssr: false,
-    loading: () => (
-      <div className="p-4 text-sm text-gray-500">Loading camera…</div>
-    ),
+    loading: () => <div className="p-4 text-sm text-gray-500">Loading camera…</div>,
   }
 );
 
@@ -51,14 +48,22 @@ export function QrScan({
         {open && (
           <div className="mt-4 rounded-xl overflow-hidden border border-gray-200">
             <QRScannerComponent
-              onDecode={(res: string) => {
-                onScanned(res);
-                setOpen(false);
+              // Library emits an array of detected codes; grab the first
+              onScan={(detected) => {
+                const val = detected?.[0]?.rawValue;
+                if (val) {
+                  onScanned(val);
+                  setOpen(false);
+                }
               }}
-              onError={(err: any) => setError(err?.message || 'Scanner error')}
-              // On laptops, 'environment' often doesn't exist; let the browser pick or use 'user'
+              onError={(err) =>
+                setError(err instanceof Error ? err.message : String(err ?? 'Scanner error'))
+              }
+              // On laptops there’s usually only a front cam; "environment" is just a hint
               constraints={{ facingMode: { ideal: 'environment' } }}
-              containerStyle={{ width: '100%' }}
+              // Use `styles` / `classNames` instead of non-existent `containerStyle`
+              styles={{ container: { width: '100%' } }}
+              classNames={{ video: 'w-full h-auto' }}
             />
           </div>
         )}

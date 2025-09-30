@@ -1,0 +1,11 @@
+{
+  "name": "TechFest POAP Collection",
+  "symbol": "POAP",
+  "description": "Collection for TechFest attendance badges",
+  "image": "collection.png",
+  "attributes": [],
+  "properties": {
+    "category": "image",
+    "files": [{ "uri": "collection.png", "type": "image/png" }]
+  }
+}

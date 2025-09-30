@@ -1,0 +1,74 @@
+# ───────────────────────────────
+# Node / Next.js
+node_modules/
+.next/
+dist/
+out/
+build/
+.npm/
+.pnpm-store/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env files
+.env
+.env.*        # all env variants
+!.env.example # keep example template
+.env.local  
+# Coverage & testing
+coverage/
+*.lcov
+
+# OS & Editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+
+# Local caches
+.cache/
+.parcel-cache/
+.next-tmp/
+.vercel/
+
+# ───────────────────────────────
+# POAP-drop / Sugar CLI artifacts
+poap-drop/.sugar/
+poap-drop/cache.json
+poap-drop/config.json
+poap-drop/*.bak
+poap-drop/.DS_Store
+
+# Don’t commit large assets unless needed
+poap-drop/assets/*.png
+poap-drop/assets/*.jpg
+poap-drop/assets/*.jpeg
+poap-drop/assets/*.gif
+poap-drop/assets/*.mp4
+
+# Allow metadata JSON to be tracked if desired
+!poap-drop/assets/*.json
+
+# ───────────────────────────────
+# Python temp files (used Pillow)
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Logs
+logs/
+*.log
+*.out
+*.err
+
+# Misc
+*.lock
+*.tgz
+*.zip

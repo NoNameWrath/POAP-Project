@@ -1,0 +1,15 @@
+{
+  "name": "TechFest POAP #1",
+  "symbol": "POAP",
+  "description": "Attendance badge for TechFest 2025",
+  "image": "0.png",
+  "attributes": [
+    { "trait_type": "Event", "value": "TechFest 2025" }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      { "uri": "0.png", "type": "image/png" }
+    ]
+  }
+}

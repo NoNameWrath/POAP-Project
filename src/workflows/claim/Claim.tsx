@@ -10,8 +10,17 @@ import { publicKey } from '@metaplex-foundation/umi'
 import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 
 const API = process.env.NEXT_PUBLIC_API_BASE || ''
-const CANDY_MACHINE_ID = process.env.NEXT_PUBLIC_CM_ID!
-const COLLECTION_MINT = process.env.NEXT_PUBLIC_COLLECTION_MINT!
+const CANDY_MACHINE_ID = process.env.NEXT_PUBLIC_CM_ID
+const COLLECTION_MINT = process.env.NEXT_PUBLIC_COLLECTION_MINT
+
+function safePk(label: string, v?: string) {
+  try {
+    if (!v || typeof v !== 'string' || v.trim() === '') throw new Error(`${label} missing`)
+    return publicKey(v.trim())
+  } catch (e: any) {
+    throw new Error(`${label} invalid: ${e?.message || 'bad value'}`)
+  }
+}
 
 export function Claim({
   enabled,
@@ -24,56 +33,71 @@ export function Claim({
   merkleProof?: string[]
   onMinted: (mint: string) => void
 }) {
-  const { publicKey: walletPk, wallet } = useWallet()
+  const { wallet, connected, publicKey: walletPk } = useWallet()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   async function handleClaim() {
-    if (!walletPk || !wallet) return
     try {
       setBusy(true)
       setErr(null)
 
-      // Final server-side anti-replay
+      // 0) Ensure a wallet adapter exists and is initialized
+      if (!wallet) throw new Error('No wallet adapter selected')
+      if (!connected) {
+        // user gesture path, safe to call inside a click handler
+        await wallet.connect()
+      }
+      if (!wallet.publicKey) throw new Error('Wallet failed to connect')
+
+      // 1) Normalize inputs
+      const cmPk = safePk('NEXT_PUBLIC_CM_ID', CANDY_MACHINE_ID)
+      const colPk = safePk('NEXT_PUBLIC_COLLECTION_MINT', COLLECTION_MINT)
+      const proof: string[] = Array.isArray(merkleProof) ? merkleProof.filter(Boolean) : []
+      const hasProof = proof.length > 0
+
+      // 2) Anti-replay with server
       const check = await fetch(`${API}/api/claim-ticket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ claimToken, wallet: walletPk.toBase58() }),
+        body: JSON.stringify({ claimToken, wallet: wallet.publicKey.toBase58() }),
       })
-      if (!check.ok) {
-        const txt = await check.text()
-        throw new Error(txt || 'Claim ticket refused')
-      }
+      if (!check.ok) throw new Error((await check.text().catch(() => '')) || 'Claim ticket refused')
 
-      // ---- UMI SETUP ----
+      // 3) Umi client + identity (after connect)
       const umi = makeUmi()
-      umi.use(walletAdapterIdentity(wallet)) // ✅ attach wallet
+      umi.use(walletAdapterIdentity(wallet))
+      const idPk = umi.identity?.publicKey
+      if (!idPk) throw new Error('Wallet identity not ready, reconnect your wallet')
 
-      // Only include allowList guard if proof is a valid array
-      const hasProof =
-        Array.isArray(merkleProof) &&
-        merkleProof.length > 0 &&
-        merkleProof.every((s) => typeof s === 'string')
-
+      // 4) Mint — pass collectionUpdateAuthority explicitly
       await mintV2(umi, {
-        candyMachine: publicKey(CANDY_MACHINE_ID),
-        collectionMint: publicKey(COLLECTION_MINT),
-        guards: hasProof ? { allowList: { merkleProof } } : undefined,
+        candyMachine: cmPk,
+        collectionMint: colPk,
+        collectionUpdateAuthority: idPk,
+        guards: hasProof ? { allowList: { merkleProof: proof } } : undefined,
       }).sendAndConfirm(umi)
-      // --------------------
 
-      // Optional: ask server to resolve mint
+      // 5) Resolve last mint (optional)
       const receipt = await fetch(`${API}/api/last-mint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: walletPk.toBase58() }),
+        body: JSON.stringify({ wallet: wallet.publicKey.toBase58() }),
       })
         .then((r) => r.json())
         .catch(() => null)
 
       onMinted(receipt?.mint || '')
     } catch (e: any) {
-      setErr(e.message || 'Mint failed')
+      // common adapter errors to surface nicely
+      if (e?.name === 'WalletNotReadyError') {
+        setErr('Selected wallet is not ready. Open the wallet app/extension and try again.')
+      } else if (e?.message?.toLowerCase?.().includes('user rejected')) {
+        setErr('Wallet connection rejected.')
+      } else {
+        setErr(e?.message || 'Mint failed')
+      }
+      console.error('Claim error:', e)
     } finally {
       setBusy(false)
     }

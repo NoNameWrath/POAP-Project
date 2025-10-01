@@ -4,100 +4,184 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Loader2, Medal, AlertTriangle } from 'lucide-react'
 import { useWallet } from '@solana/wallet-adapter-react'
+import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import { makeUmi } from '@/lib/umi/createUmiClient'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
-import { publicKey } from '@metaplex-foundation/umi'
-import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
+import { publicKey, generateSigner } from '@metaplex-foundation/umi'
+import {
+  fetchCandyMachine,
+  mint as mintLegacy,
+  mintV2,
+} from '@metaplex-foundation/mpl-candy-machine'
+import bs58 from 'bs58'
+
+// web3.js for balance + logs
+import {
+  Connection,
+  PublicKey as Web3PublicKey,
+  LAMPORTS_PER_SOL,
+  SendTransactionError,
+} from '@solana/web3.js'
 
 const API = process.env.NEXT_PUBLIC_API_BASE || ''
-const CANDY_MACHINE_ID = process.env.NEXT_PUBLIC_CM_ID
-const COLLECTION_MINT = process.env.NEXT_PUBLIC_COLLECTION_MINT
+const RAW_CM = process.env.NEXT_PUBLIC_CM_ID
+const RAW_COLLECTION = process.env.NEXT_PUBLIC_COLLECTION_MINT
+const RPC = process.env.NEXT_PUBLIC_RPC || 'https://api.devnet.solana.com'
 
-function safePk(label: string, v?: string) {
-  try {
-    if (!v || typeof v !== 'string' || v.trim() === '') throw new Error(`${label} missing`)
-    return publicKey(v.trim())
-  } catch (e: any) {
-    throw new Error(`${label} invalid: ${e?.message || 'bad value'}`)
+// ~0.05 SOL buffer for devnet fees/rent
+const MIN_LAMPORTS = 0.05 * LAMPORTS_PER_SOL
+
+type Props = {
+  enabled: boolean
+  claimToken: string
+  merkleProof?: unknown
+  onMinted: (mint: string) => void
+}
+
+const mask = (s: string) => (s.length <= 12 ? s : `${s.slice(0, 5)}…${s.slice(-5)}`)
+
+function requireBase58Str(varName: string, v: unknown): string {
+  if (typeof v !== 'string') throw new Error(`${varName} is undefined on client. Prefix with NEXT_PUBLIC_ and restart dev.`)
+  const s = v.trim().replace(/^['"]|['"]$/g, '')
+  if (!s) throw new Error(`${varName} is empty`)
+  let bytes: Uint8Array
+  try { bytes = bs58.decode(s) } catch (e: any) {
+    throw new Error(`${varName} not valid base58 (${mask(s)}). ${e?.message || ''}`.trim())
+  }
+  if (bytes.length !== 32) throw new Error(`${varName} must decode to 32 bytes (${mask(s)}), got ${bytes.length}`)
+  return s
+}
+
+function normalizeMerkleProof(input: unknown): Uint8Array[] {
+  if (!input) return []
+  if (!Array.isArray(input)) throw new Error('merkleProof must be an array')
+  return input.filter((x) => x != null).map((x) => {
+    if (x instanceof Uint8Array) return x
+    if (Array.isArray(x)) return new Uint8Array(x as number[])
+    if (typeof x === 'string') return bs58.decode(x.trim())
+    throw new Error('merkleProof element must be base58 string or bytes')
+  })
+}
+
+async function ensureFunds(connection: Connection, owner: string) {
+  const pk = new Web3PublicKey(owner)
+  const bal = await connection.getBalance(pk, 'confirmed')
+  if (bal >= MIN_LAMPORTS) return
+
+  const isDevnet = /devnet|localhost|127\.0\.0\.1/i.test(connection.rpcEndpoint)
+  if (!isDevnet) {
+    throw new Error(
+      `Insufficient SOL on current cluster. Need ~${MIN_LAMPORTS / LAMPORTS_PER_SOL} SOL, have ${bal / LAMPORTS_PER_SOL}.`
+    )
+  }
+  // Try 2x airdrop on devnet
+  const need = Math.ceil((MIN_LAMPORTS - bal) / LAMPORTS_PER_SOL)
+  for (let i = 0; i < Math.max(1, need); i++) {
+    const sig = await connection.requestAirdrop(pk, 1 * LAMPORTS_PER_SOL)
+    await connection.confirmTransaction(sig, 'confirmed')
   }
 }
 
-export function Claim({
-  enabled,
-  claimToken,
-  merkleProof,
-  onMinted,
-}: {
-  enabled: boolean
-  claimToken: string
-  merkleProof?: string[]
-  onMinted: (mint: string) => void
-}) {
-  const { wallet, connected, publicKey: walletPk } = useWallet()
+export function Claim({ enabled, claimToken, merkleProof, onMinted }: Props) {
+  const { wallet, connected, publicKey: walletPk, connect } = useWallet()
+  const { setVisible } = useWalletModal()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   async function handleClaim() {
+    setErr(null)
+    setBusy(true)
+    const connection = new Connection(RPC, 'confirmed')
+
     try {
-      setBusy(true)
-      setErr(null)
+      // 0) Wallet connect
+      if (!wallet) { setVisible(true); throw new Error('Pick a wallet to continue') }
+      if (!connected) await connect()
+      if (!walletPk) throw new Error('Wallet connection was cancelled')
 
-      // 0) Ensure a wallet adapter exists and is initialized
-      if (!wallet) throw new Error('No wallet adapter selected')
-      if (!connected) {
-        // user gesture path, safe to call inside a click handler
-        await wallet.connect()
-      }
-      if (!wallet.publicKey) throw new Error('Wallet failed to connect')
+      // 1) Resolve inputs as strings
+      const cmStr = requireBase58Str('NEXT_PUBLIC_CM_ID', RAW_CM)
+      const colStr = requireBase58Str('NEXT_PUBLIC_COLLECTION_MINT', RAW_COLLECTION)
+      const updateAuthStr = walletPk.toBase58()
+      const proof = normalizeMerkleProof(merkleProof)
 
-      // 1) Normalize inputs
-      const cmPk = safePk('NEXT_PUBLIC_CM_ID', CANDY_MACHINE_ID)
-      const colPk = safePk('NEXT_PUBLIC_COLLECTION_MINT', COLLECTION_MINT)
-      const proof: string[] = Array.isArray(merkleProof) ? merkleProof.filter(Boolean) : []
-      const hasProof = proof.length > 0
+      console.debug('[claim] inputs', {
+        CM: mask(cmStr), COLLECTION: mask(colStr), UPDATE_AUTH: mask(updateAuthStr), proofCount: proof.length, rpc: RPC,
+      })
 
-      // 2) Anti-replay with server
-      const check = await fetch(`${API}/api/claim-ticket`, {
+      // 2) Ensure payer has funds (auto-airdrop on devnet)
+      await ensureFunds(connection, updateAuthStr)
+
+      // 3) Anti-replay
+      const resp = await fetch(`${API}/api/claim-ticket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ claimToken, wallet: wallet.publicKey.toBase58() }),
+        body: JSON.stringify({ claimToken, wallet: updateAuthStr }),
       })
-      if (!check.ok) throw new Error((await check.text().catch(() => '')) || 'Claim ticket refused')
+      if (!resp.ok) throw new Error((await resp.text().catch(() => '')) || 'Claim ticket refused by server')
 
-      // 3) Umi client + identity (after connect)
-      const umi = makeUmi()
-      umi.use(walletAdapterIdentity(wallet))
-      const idPk = umi.identity?.publicKey
-      if (!idPk) throw new Error('Wallet identity not ready, reconnect your wallet')
+      // 4) Umi identity + mint keypair
+      const umi = makeUmi().use(walletAdapterIdentity(wallet.adapter))
+      if (!umi.identity?.publicKey) throw new Error('Wallet identity not ready, reopen your wallet and try again')
+      const nftMint = generateSigner(umi)
 
-      // 4) Mint — pass collectionUpdateAuthority explicitly
-      await mintV2(umi, {
-        candyMachine: cmPk,
-        collectionMint: colPk,
-        collectionUpdateAuthority: idPk,
-        guards: hasProof ? { allowList: { merkleProof: proof } } : undefined,
-      }).sendAndConfirm(umi)
+      // 5) Fetch Candy Machine to decide mint route
+      const cmPk = publicKey(cmStr)
+      const colPk = publicKey(colStr)
+      const updPk = publicKey(updateAuthStr)
 
-      // 5) Resolve last mint (optional)
+      let cm
+      try {
+        cm = await fetchCandyMachine(umi, cmPk)
+      } catch (e) {
+        throw new Error(`Candy Machine ${mask(cmStr)} not found on current cluster ${RPC}`)
+      }
+
+      // Check if the candy machine is guarded by comparing its authority to the user's wallet.
+      const isGuarded = cm.authority.toString() !== walletPk.toBase58();
+
+      if (!isGuarded) {
+        console.log("Minting from an unguarded machine...");
+        // Not guarded -> use legacy mint
+        await mintLegacy(umi, {
+          candyMachine: cmPk,
+          collectionMint: colPk,
+          collectionUpdateAuthority: updPk,
+          nftMint,
+        }).sendAndConfirm(umi);
+      } else {
+        console.log("Minting from a guarded machine...");
+        // Guarded -> the authority is the guard address
+        const guardAddr = cm.authority;
+        await mintV2(umi, {
+          candyMachine: cmPk,
+          candyGuard: guardAddr,
+          collectionMint: colPk,
+          collectionUpdateAuthority: updPk,
+          nftMint,
+          guards: proof.length ? { allowList: { merkleProof: proof } } : undefined,
+        }).sendAndConfirm(umi);
+      }
+
+      // 6) Optionally fetch newest mint for UI
       const receipt = await fetch(`${API}/api/last-mint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: wallet.publicKey.toBase58() }),
-      })
-        .then((r) => r.json())
-        .catch(() => null)
+        body: JSON.stringify({ wallet: updateAuthStr }),
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
 
-      onMinted(receipt?.mint || '')
+      onMinted(receipt?.mint || nftMint.publicKey.toString())
     } catch (e: any) {
-      // common adapter errors to surface nicely
-      if (e?.name === 'WalletNotReadyError') {
-        setErr('Selected wallet is not ready. Open the wallet app/extension and try again.')
-      } else if (e?.message?.toLowerCase?.().includes('user rejected')) {
-        setErr('Wallet connection rejected.')
-      } else {
-        setErr(e?.message || 'Mint failed')
-      }
-      console.error('Claim error:', e)
+      // Surface full sim logs if available
+      try {
+        if (e instanceof SendTransactionError && typeof e.getLogs === 'function') {
+          const logs = await e.getLogs(new Connection(RPC, 'confirmed'))
+          console.error('[claim logs]', logs)
+        }
+      } catch {}
+      const m = String(e?.message || e || '')
+      setErr(m || 'Claim failed')
+      console.error('[claim]', e)
     } finally {
       setBusy(false)
     }
@@ -107,16 +191,18 @@ export function Claim({
     <Card>
       <div className="flex items-center justify-between">
         <h3 className="font-semibold flex items-center gap-2">
-          <Medal className="w-5 h-5" /> Claim NFT
+          <Medal className="w-5 h-5" /> Claim POAP
         </h3>
-        <Badge>{enabled ? 'Ready' : 'Locked'}</Badge>
+        <Badge>{connected ? 'Wallet Connected' : 'Step 4'}</Badge>
       </div>
 
       <div className="mt-4">
         <button
-          onClick={handleClaim}
           disabled={!enabled || busy}
-          className="w-full rounded-xl px-4 py-3 text-white bg-black hover:opacity-90 disabled:opacity-50"
+          onClick={handleClaim}
+          className={`w-full inline-flex items-center justify-center rounded-lg px-4 py-2 text-white ${
+            !enabled || busy ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+          }`}
         >
           {busy ? (
             <span className="inline-flex items-center gap-2">

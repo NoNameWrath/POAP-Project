@@ -11,15 +11,18 @@ const FALLBACK = 'https://api.devnet.solana.com'
 const RPC = process.env.NEXT_PUBLIC_RPC || FALLBACK
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const wallets = useMemo(() => [
-    new PhantomWalletAdapter(),
-    new BackpackWalletAdapter(),
-    new SolflareWalletAdapter(),
-  ], [])
+  const wallets = useMemo(
+    () => [new PhantomWalletAdapter(), new BackpackWalletAdapter(), new SolflareWalletAdapter()],
+    []
+  )
 
   return (
     <ConnectionProvider endpoint={RPC}>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletProvider
+        wallets={wallets}
+        autoConnect
+        onError={(e) => console.error('[wallet]', e)} // surfaces adapter errors
+      >
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>

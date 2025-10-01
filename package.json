@@ -10,6 +10,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@metaplex-foundation/mpl-candy-guard": "^0.5.0",
     "@metaplex-foundation/mpl-candy-machine": "^6.1.0",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@metaplex-foundation/umi": "^1.0.0",
@@ -26,16 +27,19 @@
     "autoprefixer": "^10.4.20",
     "framer-motion": "^11.2.10",
     "jsonwebtoken": "^9.0.2",
+    "keccak256": "^1.0.6",
     "lucide-react": "^0.453.0",
-    "next": "14.2.5",
+    "merkletreejs": "^0.6.0",
+    "next": "^14.2.33",
     "postcss": "^8.4.44",
-    "react": "^18.2.0",
-    "react-dom": "18.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.2.0",
     "tailwindcss": "^3.4.10",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.5",
     "prettier": "^3.3.3",

@@ -6,10 +6,7 @@
   "isMutable": true,
   "isSequential": false,
   "creators": [
-    {
-      "address": "Mv29yFrfauyyGEQHd8u9JWDvihCeMukCU78n7s2D6vj",
-      "share": 100
-    }
+    { "address": "Mv29yFrfauyyGEQHd8u9JWDvihCeMukCU78n7s2D6vj", "share": 100 }
   ],
   "uploadMethod": "bundlr",
   "ruleSet": null,
@@ -19,6 +16,16 @@
   "shdwStorageAccount": null,
   "pinataConfig": null,
   "hiddenSettings": null,
-  "guards": null,
+  "guards": {
+    "default": {
+      "allowList": {
+        "merkleRoot": "ab08bd0f952c9d06d529c44736eaa09d0a2290c73eb6079e955cfb0b8bb2f14f"
+      },
+      "botTax": {
+        "value": 0.01,
+        "lastInstruction": true
+      }
+    }
+  },
   "maxEditionSupply": null
 }

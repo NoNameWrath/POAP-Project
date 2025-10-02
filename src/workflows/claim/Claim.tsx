@@ -7,7 +7,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import { makeUmi } from '@/lib/umi/createUmiClient'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
-import { publicKey, generateSigner } from '@metaplex-foundation/umi'
+import { publicKey, generateSigner, some } from '@metaplex-foundation/umi'
 import {
   fetchCandyMachine,
   mint as mintLegacy,
@@ -25,6 +25,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_BASE || ''
 const RAW_CM = process.env.NEXT_PUBLIC_CM_ID
+const RAW_CG = process.env.NEXT_PUBLIC_CG_ID
 const RAW_COLLECTION = process.env.NEXT_PUBLIC_COLLECTION_MINT
 const RPC = process.env.NEXT_PUBLIC_RPC || 'https://api.devnet.solana.com'
 
@@ -101,6 +102,7 @@ export function Claim({ enabled, claimToken, merkleProof, onMinted }: Props) {
 
       // 1) Resolve inputs as strings
       const cmStr = requireBase58Str('NEXT_PUBLIC_CM_ID', RAW_CM)
+      const cgStr = requireBase58Str('NEXT_PUBLIC_CG_ID', RAW_CG)
       const colStr = requireBase58Str('NEXT_PUBLIC_COLLECTION_MINT', RAW_COLLECTION)
       const updateAuthStr = walletPk.toBase58()
       const proof = normalizeMerkleProof(merkleProof)
@@ -127,6 +129,7 @@ export function Claim({ enabled, claimToken, merkleProof, onMinted }: Props) {
 
       // 5) Fetch Candy Machine to decide mint route
       const cmPk = publicKey(cmStr)
+      const cgPk = publicKey(cgStr)
       const colPk = publicKey(colStr)
       const updPk = publicKey(updateAuthStr)
 
@@ -137,14 +140,18 @@ export function Claim({ enabled, claimToken, merkleProof, onMinted }: Props) {
         throw new Error(`Candy Machine ${mask(cmStr)} not found on current cluster ${RPC}`)
       }
 
-      console.log('Fetched Candy Machine:', cm)
+
 
       console.log("Forcing unguarded mint (mintLegacy)...");
-      await mintLegacy(umi, {
+      await mintV2(umi, {
         candyMachine: cmPk,
-        collectionMint: colPk,
-        collectionUpdateAuthority: updPk,
-        nftMint: nftMint.publicKey,
+        candyGuard: cgPk,
+        collectionMint: cm.collectionMint,
+        collectionUpdateAuthority: cm.authority,
+        nftMint: nftMint,
+        mintArgs: {
+          allowList: some({ merkleProof: proof }),
+        },
       }).sendAndConfirm(umi);
 
       // 6) Optionally fetch newest mint for UI

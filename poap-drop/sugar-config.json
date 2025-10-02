@@ -19,7 +19,7 @@
   "guards": {
     "default": {
       "allowList": {
-        "merkleRoot": "ab08bd0f952c9d06d529c44736eaa09d0a2290c73eb6079e955cfb0b8bb2f14f"
+        "merkleRoot": "4c3985520f2451f3af04205392695d172fc243e81ebb6c1bafbf0dafcf287675"
       },
       "botTax": {
         "value": 0.01,

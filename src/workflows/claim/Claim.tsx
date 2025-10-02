@@ -137,31 +137,15 @@ export function Claim({ enabled, claimToken, merkleProof, onMinted }: Props) {
         throw new Error(`Candy Machine ${mask(cmStr)} not found on current cluster ${RPC}`)
       }
 
-      // Check if the candy machine is guarded by comparing its authority to the user's wallet.
-      const isGuarded = cm.authority.toString() !== walletPk.toBase58();
+      console.log('Fetched Candy Machine:', cm)
 
-      if (!isGuarded) {
-        console.log("Minting from an unguarded machine...");
-        // Not guarded -> use legacy mint
-        await mintLegacy(umi, {
-          candyMachine: cmPk,
-          collectionMint: colPk,
-          collectionUpdateAuthority: updPk,
-          nftMint,
-        }).sendAndConfirm(umi);
-      } else {
-        console.log("Minting from a guarded machine...");
-        // Guarded -> the authority is the guard address
-        const guardAddr = cm.authority;
-        await mintV2(umi, {
-          candyMachine: cmPk,
-          candyGuard: guardAddr,
-          collectionMint: colPk,
-          collectionUpdateAuthority: updPk,
-          nftMint,
-          guards: proof.length ? { allowList: { merkleProof: proof } } : undefined,
-        }).sendAndConfirm(umi);
-      }
+      console.log("Forcing unguarded mint (mintLegacy)...");
+      await mintLegacy(umi, {
+        candyMachine: cmPk,
+        collectionMint: colPk,
+        collectionUpdateAuthority: updPk,
+        nftMint: nftMint.publicKey,
+      }).sendAndConfirm(umi);
 
       // 6) Optionally fetch newest mint for UI
       const receipt = await fetch(`${API}/api/last-mint`, {
